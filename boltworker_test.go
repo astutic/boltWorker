@@ -2,7 +2,7 @@ package boltworker_test
 
 /* TODO: test cases which needs to be covered.
 1. Configuration and DB creation
-2. Creation of buckets
+2. Creation of all buckets
 3. Registering of handle
 4. Starting of boltWorker
 5. Workers and concurrency
@@ -17,4 +17,5 @@ package boltworker_test
 14. Job Fail and failed bucket
 15. JobINProcess flag test
 16. Stop and all jobs in DB
+17. Jobs without any arguments.
 */

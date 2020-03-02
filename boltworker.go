@@ -47,13 +47,13 @@ type BoltWorker struct {
 
 // NewBoltWorker creates a buffalo worker interface implementation which
 // persists data in boltDB defined in the opts
-func NewBoltWorker(opts *boltDBOptions) *BoltWorker {
+func NewBoltWorker(opts Options) *BoltWorker {
 	return NewBoltWorkerWithContext(context.Background(), opts)
 }
 
 // NewBoltWorkerWithContext creates a buffalo worker interface implementation
 // which persists data in boltDB defined in opts
-func NewBoltWorkerWithContext(ctx context.Context, opts *boltDBOptions) *BoltWorker {
+func NewBoltWorkerWithContext(ctx context.Context, opts Options) *BoltWorker {
 	ctx, cancel := context.WithCancel(ctx)
 
 	// Set defaults if not provided in options
@@ -61,6 +61,7 @@ func NewBoltWorkerWithContext(ctx context.Context, opts *boltDBOptions) *BoltWor
 	opts.MaxConcurrency = defaults.Int(opts.MaxConcurrency, 10)
 	opts.CompletedBucket = defaults.String(opts.CompletedBucket, "completed")
 	opts.PendingBucket = defaults.String(opts.PendingBucket, "pending")
+	opts.FailedBucket = defaults.String(opts.FailedBucket, "failed")
 	opts.PollDBTime = defaults.String(opts.PollDBTime, "5s")
 
 	if opts.Logger == nil {
@@ -70,7 +71,7 @@ func NewBoltWorkerWithContext(ctx context.Context, opts *boltDBOptions) *BoltWor
 		opts.Logger = logger
 	}
 
-	bDB := NewBoltDB(opts)
+	bDB := NewBoltDB(&opts)
 	pollTime, err := time.ParseDuration(opts.PollDBTime)
 	if err != nil {
 		panic(err)
@@ -162,9 +163,11 @@ func (bw *BoltWorker) queueManager() {
 				bw.perform(inJob)
 			}
 		case bw.getWorkChan <- outJob:
-			bw.jobQueue.Remove(e)
-			outJob = nil
-			e = nil
+			if e != nil && outJob != nil {
+				bw.jobQueue.Remove(e)
+				outJob = nil
+				e = nil
+			}
 		case <-bw.ctx.Done():
 			bw.cancel()
 			bw.Logger.Info("queue manager stopping")
@@ -182,13 +185,15 @@ func (bw *BoltWorker) queueManager() {
 			e = bw.jobQueue.Front()
 			if e != nil {
 				outJob = e.Value.(*boltJob)
+				bw.Logger.Debugf("got job %s from queue", outJob)
 				if !outJob.WorkAT.IsZero() && outJob.WorkAT.Sub(time.Now()) > 0 {
 					bw.jobQueue.MoveToBack(e)
 					outJob = nil
 					e = nil
 				}
 			} else {
-				bw.Logger.Debug("Job queue is empty...")
+				bw.Logger.Debug("Job queue is empty... Wait for some time")
+				time.Sleep(500 * time.Millisecond)
 			}
 		}
 	}
@@ -219,7 +224,7 @@ func (bw *BoltWorker) SyncWithDB() error {
 
 // SpawnWorkers creates concurrent worker goroutines based on the MaxConcurrency opt provided
 func (bw *BoltWorker) SpawnWorkers() {
-	bw.Logger.Info("Spawning %d workers", bw.Concurrency)
+	bw.Logger.Infof("Spawning %d workers", bw.Concurrency)
 	for i := 1; i <= bw.Concurrency; i++ {
 		go bw.startWork(i)
 	}
@@ -233,7 +238,7 @@ func (bw *BoltWorker) startWork(worker int) {
 		select {
 		case job = <-bw.getWorkChan:
 			if job == nil {
-				bw.Logger.Debugf("worker %d: nil job received...", worker)
+				//bw.Logger.Debugf("worker %d: nil job received...", worker)
 				continue
 			}
 			bw.Logger.Infof("worker %d: got job %s", worker, job.Name)

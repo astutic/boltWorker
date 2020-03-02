@@ -18,10 +18,10 @@ type boltDB struct {
 }
 
 // NewBoltDB creates a new instance for boltDB used for boltWorker
-func NewBoltDB(bo *boltDBOptions) *boltDB {
+func NewBoltDB(bo *Options) *boltDB {
 	b := new(boltDB)
 	b.fileName = bo.FilePath
-	b.boltOptions = *bo.Options
+	b.boltOptions = bo.BoltOptions
 
 	b.completedBucket = []byte(bo.CompletedBucket)
 	b.pendingBucket = []byte(bo.PendingBucket)

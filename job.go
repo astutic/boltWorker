@@ -94,5 +94,6 @@ func getBoltJob(job worker.Job) *boltJob {
 	bj.Name = job.Args.String()
 	bj.Args = job.Args
 	bj.Handler = job.Handler
+	bj.Status = JobPending
 	return bj
 }

@@ -2,16 +2,12 @@ package boltworker
 
 import "github.com/boltdb/bolt"
 
-// ConfigOptions are used to configure boltWorker
-type ConfigOptions struct {
-	Logger         Logger
-	Name           string
-	MaxConcurrency int
-}
-
-type boltDBOptions struct {
-	ConfigOptions
-	*bolt.Options
+// Options are used to configure boltWorker
+type Options struct {
+	BoltOptions     bolt.Options
+	Logger          Logger
+	Name            string
+	MaxConcurrency  int
 	FilePath        string
 	CompletedBucket string
 	PendingBucket   string
