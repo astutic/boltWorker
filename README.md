@@ -16,7 +16,6 @@ w.Perform(worker.Job{
 The task will be performed by the background workers spawned by your buffalo App server
 
 ## Setup
----
 Default boltWorker can be configured by providing a DB filepath
 ```go
 import "github.com/astutic/boltWorker"
@@ -33,7 +32,6 @@ buffalo.New(buffalo.Options {
 ```
 
 ## boltWorker Options
----
 The following options can be configured for boltWorker
 
 ### **BoltOptions**      *bolt.Options*
@@ -108,7 +106,7 @@ An example
 import "github.com/gobuffalo/uuid"
 
 jn := func(job worker.Job) string {
-		return job.Args.String()
+	return job.Args.String()
 }
 
 app = buffalo.New(buffalo.Options{
@@ -123,7 +121,6 @@ app = buffalo.New(buffalo.Options{
 ```
 
 ## Disclaimer
----
 - Not developed for performance.
 - Not optimized for memory, Holds the entire DB in memory.
 - Not suitable for large and/or distributed workloads.
