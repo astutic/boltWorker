@@ -11,17 +11,23 @@ import (
 // RetryJobError denotes jobs which temporarily failed and should be retried
 type RetryJobError struct {
 	message string
-	retryIN time.Duration
+	RetryIN time.Duration
+}
+
+// NewRetryJobError returns an instance of RetryJobError,
+// this denotes a temporary failure and the job will be retried
+func NewRetryJobError(msg string) RetryJobError {
+	return RetryJobError{message: msg}
 }
 
 // Error returns the error as a string
 func (e RetryJobError) Error() string {
-	return fmt.Sprintf("temporary error: %s, retry in %d seconds", e.message, e.retryIN)
+	return fmt.Sprintf("temporary error: %s, retry in %v seconds", e.message, e.RetryIN.Seconds())
 }
 
-// NewRetryJobError creates a new error of type RetryJobError
-func NewRetryJobError(message string) RetryJobError {
-	return RetryJobError{message: message}
+// SetRetryTime sets the retry time in time.Duration
+func (e *RetryJobError) SetRetryTime(t time.Duration) {
+	e.RetryIN = t
 }
 
 type jobStatusCode uint8
@@ -48,7 +54,7 @@ func (js jobStatusCode) HasAll(jobStatus ...jobStatusCode) bool {
 	return status == js
 }
 
-// HasAny checks whether the jobStatus has atleast any 1 of the status codes
+// HasAny checks whether the jobStatus has any 1 of the status codes
 // passed set.
 func (js jobStatusCode) HasAny(jobStatus ...jobStatusCode) bool {
 	var status jobStatusCode
@@ -62,7 +68,7 @@ func (js jobStatusCode) HasAny(jobStatus ...jobStatusCode) bool {
 func (js *jobStatusCode) Remove(jobStatus jobStatusCode) *jobStatusCode {
 	t := *js
 	t = t &^ jobStatus
-	js = &t
+	*js = t
 	return js
 }
 
@@ -80,6 +86,10 @@ type boltJob struct {
 	Attempt int
 	// WorkAT stores the time the worker has to work at
 	WorkAT time.Time
+	// Time when the job was first added
+	TimeAdded time.Time
+	// Time when the job was last worked on
+	TimeLastWorkDone time.Time
 }
 
 // Returns a json serialized string of boltJob
@@ -89,11 +99,13 @@ func (bj boltJob) String() string {
 }
 
 // getBoltJob creates a new boltJob from a Worker job
-func getBoltJob(job worker.Job) *boltJob {
+func getBoltJob(job worker.Job, jn JobNameGenerator) *boltJob {
 	bj := new(boltJob)
-	bj.Name = job.Args.String()
+	// Set the Name attribute if you want to use custom IDs instead of auto-increment ids.
+	bj.Name = jn(job)
 	bj.Args = job.Args
 	bj.Handler = job.Handler
 	bj.Status = JobPending
+	bj.TimeAdded = time.Now()
 	return bj
 }

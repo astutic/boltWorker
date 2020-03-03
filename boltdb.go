@@ -66,7 +66,7 @@ func (b *boltDB) Update(job *boltJob) error {
 	if job.Status.HasAll(JobDone) {
 		err = b._moveFromPendingTo(job, b.completedBucket)
 	} else if job.Status.HasAny(JobFailed) {
-		err = b._moveFromPendingTo(job, b.completedBucket)
+		err = b._moveFromPendingTo(job, b.failedBucket)
 	} else if job.Status.HasAny(JobPending, JobReAttempt) {
 		err = b._updatePending(job)
 	} else {
