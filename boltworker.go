@@ -58,8 +58,12 @@ func NewBoltWorker(opts Options) *BoltWorker {
 	return NewBoltWorkerWithContext(context.Background(), opts)
 }
 
+// JobNameGenerator function that will be run to determine the key for the
+// job which will be saved in boltDB
 type JobNameGenerator func(worker.Job) string
 
+// DefaultJobNameGenerator is the default job name generator which
+// assigns a uuid version 4 id to the job
 func DefaultJobNameGenerator(job worker.Job) string {
 	return uuid.Must(uuid.NewV4()).String()
 }
@@ -69,6 +73,9 @@ func DefaultJobNameGenerator(job worker.Job) string {
 func NewBoltWorkerWithContext(ctx context.Context, opts Options) *BoltWorker {
 	ctx, cancel := context.WithCancel(ctx)
 
+	if opts.FilePath == "" {
+		panic(fmt.Errorf("FilePath is required"))
+	}
 	// Set defaults if not provided in options
 	opts.Name = defaults.String(opts.Name, "buffalo")
 	opts.MaxConcurrency = defaults.Int(opts.MaxConcurrency, 10)
