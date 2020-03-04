@@ -66,9 +66,7 @@ func (js jobStatusCode) HasAny(jobStatus ...jobStatusCode) bool {
 
 // Remove removes the status code from jobStatus
 func (js *jobStatusCode) Remove(jobStatus jobStatusCode) *jobStatusCode {
-	t := *js
-	t = t &^ jobStatus
-	*js = t
+	*js = *js &^ jobStatus
 	return js
 }
 
@@ -101,7 +99,6 @@ func (bj boltJob) String() string {
 // getBoltJob creates a new boltJob from a Worker job
 func getBoltJob(job worker.Job, jn JobNameGenerator) *boltJob {
 	bj := new(boltJob)
-	// Set the Name attribute if you want to use custom IDs instead of auto-increment ids.
 	bj.Name = jn(job)
 	bj.Args = job.Args
 	bj.Handler = job.Handler

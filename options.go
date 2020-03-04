@@ -1,6 +1,13 @@
 package boltworker
 
-import "github.com/boltdb/bolt"
+import (
+	"github.com/boltdb/bolt"
+	"github.com/gobuffalo/buffalo/worker"
+)
+
+// JobNameGenerator function that will be run to determine the key for the
+// job which will be saved in boltDB
+type JobNameGenerator func(worker.Job) string
 
 // Options are used to configure boltWorker
 type Options struct {

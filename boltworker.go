@@ -26,7 +26,7 @@ import (
 	"github.com/gobuffalo/buffalo/worker"
 )
 
-// Ensure the Worker adaptor is implemented
+// Ensures the Worker Interface is implemented correctly
 var _ worker.Worker = &BoltWorker{}
 
 // BoltWorker is a basic implementation of buffalo worker interface
@@ -57,10 +57,6 @@ type BoltWorker struct {
 func NewBoltWorker(opts Options) *BoltWorker {
 	return NewBoltWorkerWithContext(context.Background(), opts)
 }
-
-// JobNameGenerator function that will be run to determine the key for the
-// job which will be saved in boltDB
-type JobNameGenerator func(worker.Job) string
 
 // DefaultJobNameGenerator is the default job name generator which
 // assigns a uuid version 4 id to the job
@@ -169,8 +165,9 @@ func (bw *BoltWorker) Start(ctx context.Context) error {
 	return nil
 }
 
-// QueueManager is the single thread which is responsible for interfacing with boltDB
-// Do not directly access the DB but only via the queueManager
+// queueManager should always be a single thread which is responsible
+// for interfacing with boltDB.
+// Do not directly access the DB when queueManager is running
 func (bw *BoltWorker) queueManager() {
 	bw.qManagerLock.Lock()
 	bw.Logger.Info("starting queue manager")
@@ -269,7 +266,8 @@ func (bw *BoltWorker) LoadPendingJobs() {
 
 }
 
-// SyncWithDB syncs the jobQueue with DB, not threadsafe needs to be called within a mutex Lock
+// SyncWithDB syncs the jobQueue with DB,
+// not threadsafe and needs to be called within a mutex Lock
 // No other concurrent operations with the jobQueue should take place.
 func (bw *BoltWorker) SyncWithDB() error {
 	bw.Logger.Debug("Sync with DB called...")
@@ -317,7 +315,8 @@ func (bw *BoltWorker) checkAndPushQ(job *boltJob) {
 	}
 }
 
-// SpawnWorkers creates concurrent worker goroutines based on the MaxConcurrency opt provided
+// SpawnWorkers creates concurrent worker goroutines
+// based on the MaxConcurrency option provided
 func (bw *BoltWorker) SpawnWorkers() {
 	bw.Logger.Infof("Spawning %d workers", bw.Concurrency)
 	for i := 1; i <= bw.Concurrency; i++ {
@@ -351,11 +350,13 @@ func (bw *BoltWorker) startWork(worker int) {
 					if err != nil {
 						if errRetry, ok := err.(RetryJobError); ok {
 							job.Status = job.Status | JobReAttempt
-							bw.Logger.Infof("worker %d: job %s failed temporarily with error %s, attempts: %d, retrying...", worker, job.Name, err, job.Attempt)
+							bw.Logger.Infof("worker %d: job %s failed temporarily with error %s,"+
+								"attempts: %d, retrying...", worker, job.Name, err, job.Attempt)
 							job.WorkAT = time.Now().Add(errRetry.RetryIN)
 							job.Attempt++
 							if job.Attempt > bw.RetryAttempts {
-								bw.Logger.Infof("worker %d: job %s exceeded max retry attempts (%d of %d), marking the job failed.", worker, job.Name, job.Attempt, bw.RetryAttempts)
+								bw.Logger.Infof("worker %d: job %s exceeded max retry attempts (%d of %d), "+
+									"marking the job failed.", worker, job.Name, job.Attempt, bw.RetryAttempts)
 								job.Status = job.Status | JobFailed
 							}
 						} else {

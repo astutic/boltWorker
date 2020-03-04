@@ -34,62 +34,62 @@ buffalo.New(buffalo.Options {
 ## boltWorker Options
 The following options can be configured for boltWorker
 
-### **BoltOptions**      *bolt.Options*
-```
-Boltoptions are options which can be passed for boltDB
-```
-
-### **Logger**           *Logger*
-```
-Logger if passed will be used for logging, else a logrus TextFormatter with InfoLevel will be used
-```
-
-### **Name**             *string*
-```
-Name is for future use if any. Default value is 'buffalo'
-```
-
-###	**MaxConcurrency**   *int*
-```
-MaxConcurrency determines how many workers will be spawned. Default is 10.
-```
-
-### **FilePath**         *string*
+### **FilePath**         ```string```
 ```
 FilePath is where the boltDB will be created/accessed. Must Have parameter.
 ```
 
-###	**CompletedBucket**  *string*
+### **BoltOptions**      ```bolt.Options```
+```
+Boltoptions are options which can be passed for boltDB
+```
+
+### **Logger**           ```Logger```
+```
+Logger if passed will be used for logging, else a logrus TextFormatter with InfoLevel will be used
+```
+
+### **Name**             ```string```
+```
+Name is for future use if any. Default value is 'buffalo'
+```
+
+###	**MaxConcurrency**   ```int```
+```
+MaxConcurrency determines how many workers will be spawned. Default is 10.
+```
+
+###	**CompletedBucket**  ```string```
 ```
 Name of the bucket where completed jobs will be saved. Default 'completed'.
 ```
 
-###	**PendingBucket**    *string*
+###	**PendingBucket**    ```string```
 ```
 Name of the bucket where jobs which are incomplete will be saved. Default 'pending'.
 ```
 
-###	**FailedBucket**     *string*
+###	**FailedBucket**     ```string```
 ```
 Name of the bucket where jobs which fail will be saved. Default 'failed'.
 ```
 
-###	**PollDBTime**       *string*
+###	**PollDBTime**       ```string```
 ```
 A time.Duration string used as in interval to sync boltDB to read jobs from the DB. Default '30s'. 
 ```
 
-###	**MaxRetryAttempts** *int*
+###	**MaxRetryAttempts** ```int```
 ```
 Number of attempts for jobs which return RetryJobError after which the job will be declared failed. Default 10.
 ```
 
-###	**IdleSleepTime**    *string*
+###	**IdleSleepTime**    ```string```
 ```
 A time.Duration string which determines the sleep time when there are no jobs in the Queue. Default '5s'
 ```
 
-###	**JobNameHandler**   *JobNameGenerator*
+###	**JobNameHandler**   ```JobNameGenerator```
 ```go
 A function of type ***func(worker.Job) string** which will be called to set the key of the job.
 Default is UUID version 4 generator

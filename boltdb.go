@@ -135,9 +135,8 @@ func (b *boltDB) _updatePending(job *boltJob) error {
 }
 
 func (b *boltDB) forEach(bucket []byte, fn func(k, v []byte) error) error {
-	err := b.db.View(func(tx *bolt.Tx) error {
+	return b.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucket)
 		return b.ForEach(fn)
 	})
-	return err
 }
