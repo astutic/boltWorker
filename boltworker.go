@@ -32,24 +32,27 @@ var _ worker.Worker = &BoltWorker{}
 // BoltWorker is a basic implementation of buffalo worker interface
 // which persists job data in boltDB
 type BoltWorker struct {
-	Logger            Logger
-	ctx               context.Context
-	cancel            context.CancelFunc
-	handlers          map[string]worker.Handler
-	handlerLock       *sync.RWMutex
-	DB                *boltDB
-	PollDBTime        time.Duration
-	IdleSleepTime     time.Duration
-	Concurrency       int
-	getWorkChan       chan *boltJob
-	pushWorkChan      chan *boltJob
-	updateDBChan      chan *boltJob
-	jobQueue          *list.List
-	qManagerLock      *sync.Mutex
-	jobsInWorkers     map[string]bool
-	isQManagerRunning bool
-	RetryAttempts     int
-	jobNameHandler    JobNameGenerator
+	Logger              Logger
+	ctx                 context.Context
+	cancel              context.CancelFunc
+	handlers            map[string]worker.Handler
+	handlerLock         *sync.RWMutex
+	DB                  *boltDB
+	DBSyncInterval      time.Duration
+	IdleSleepTime       time.Duration
+	BusyWorkerSleepTime time.Duration
+	Concurrency         int
+	getWorkChan         chan *boltJob
+	pushWorkChan        chan *boltJob
+	updateDBChan        chan *boltJob
+	jobQueue            *list.List
+	qManagerLock        *sync.Mutex
+	jobsInWorkers       map[string]bool
+	qLock               *sync.Mutex
+	qStop               chan bool
+	isQManagerRunning   bool
+	RetryAttempts       int
+	jobNameHandler      JobNameGenerator
 }
 
 // NewBoltWorker creates a buffalo worker interface implementation which
@@ -78,7 +81,7 @@ func NewBoltWorkerWithContext(ctx context.Context, opts Options) *BoltWorker {
 	opts.CompletedBucket = defaults.String(opts.CompletedBucket, "completed")
 	opts.PendingBucket = defaults.String(opts.PendingBucket, "pending")
 	opts.FailedBucket = defaults.String(opts.FailedBucket, "failed")
-	opts.PollDBTime = defaults.String(opts.PollDBTime, "30s")
+	opts.DBSyncInterval = defaults.String(opts.DBSyncInterval, "30s")
 	opts.IdleSleepTime = defaults.String(opts.IdleSleepTime, "5s")
 	opts.MaxRetryAttempts = defaults.Int(opts.MaxRetryAttempts, 10)
 
@@ -94,13 +97,18 @@ func NewBoltWorkerWithContext(ctx context.Context, opts Options) *BoltWorker {
 	}
 
 	bDB := NewBoltDB(&opts)
-	pollTime, err := time.ParseDuration(opts.PollDBTime)
+	pollTime, err := time.ParseDuration(opts.DBSyncInterval)
 	if err != nil {
 		panic(err)
 	}
 	idleTime, err := time.ParseDuration(opts.IdleSleepTime)
 	if err != nil {
 		panic(err)
+	}
+
+	if pollTime <= idleTime {
+		panic(fmt.Errorf("DBSyncInterval is configured less than IdleSleepTime," +
+			"please have a higher value for DBSyncInterval"))
 	}
 
 	return &BoltWorker{
@@ -112,7 +120,7 @@ func NewBoltWorkerWithContext(ctx context.Context, opts Options) *BoltWorker {
 		DB:             bDB,
 		Concurrency:    opts.MaxConcurrency,
 		qManagerLock:   &sync.Mutex{},
-		PollDBTime:     pollTime,
+		DBSyncInterval: pollTime,
 		IdleSleepTime:  idleTime,
 		RetryAttempts:  opts.MaxRetryAttempts,
 		jobNameHandler: opts.JobNameHandler,
@@ -145,10 +153,12 @@ func (bw *BoltWorker) Start(ctx context.Context) error {
 		return err
 	}
 	bw.jobQueue = list.New()
+	bw.qLock = &sync.Mutex{}
 	bw.jobsInWorkers = make(map[string]bool)
 	bw.getWorkChan = make(chan *boltJob)
 	bw.pushWorkChan = make(chan *boltJob)
 	bw.updateDBChan = make(chan *boltJob)
+	bw.qStop = make(chan bool)
 	go func() {
 		select {
 		case <-ctx.Done():
@@ -178,10 +188,10 @@ func (bw *BoltWorker) queueManager() {
 	}()
 	var inJob, outJob *boltJob
 	var e *list.Element
-	dbSync := time.After(bw.PollDBTime)
-	// emptyChan is just an empty channel to prevent the select case from executing when outJob is nil
+	dbSync := time.After(bw.DBSyncInterval)
+	// emptyChan is just an empty channel to prevent selection of getWorkChan when queue is empty
 	emptyChan := make(chan *boltJob)
-	// outJobChan points to either empty or bw.getWorkChan depending on whether outJob is nil or has a job
+	// outJobChan points to either empty or getWorkChan depending on whether outJob is nil
 	outJobChan := emptyChan
 	for {
 		select {
@@ -189,36 +199,48 @@ func (bw *BoltWorker) queueManager() {
 			bw.Logger.Debugf("Pushing Job %s to back of queue", inJob.Name)
 			bw.checkAndPushQ(inJob)
 		case inJob = <-bw.updateDBChan:
+			bw.qLock.Lock()
 			err := bw.DB.Update(inJob)
-			delete(bw.jobsInWorkers, inJob.Name)
 			if err != nil {
 				// TODO Should we panic or re-attempt DB update?
 				bw.Logger.Errorf("unable to update DB for job %s, error: %s", inJob, err)
 			}
+			delete(bw.jobsInWorkers, inJob.Name)
+			bw.qLock.Unlock()
 			if inJob.Status.HasAll(JobDone) {
+				bw.removeFromQ(inJob)
 				continue
 			}
 			if inJob.Status.HasAny(JobFailed) {
+				bw.removeFromQ(inJob)
 				continue
 			}
 			if inJob.Status.HasAny(JobPending, JobReAttempt) {
-				bw.perform(inJob)
+				//bw.perform(inJob)
+				// we directly push to the queue
+				bw.checkAndPushQ(inJob)
 			}
 		case outJobChan <- outJob:
 			if e != nil && outJob != nil {
+				bw.qLock.Lock()
 				bw.jobQueue.Remove(e)
 				bw.jobsInWorkers[outJob.Name] = true
+				bw.qLock.Unlock()
 				outJob = nil
 				e = nil
 				outJobChan = emptyChan
 			}
+		case <-bw.qStop:
+			bw.Logger.Info("queue manager stopping")
+			bw.qStop <- true
+			return
 		case <-bw.ctx.Done():
 			bw.cancel()
 			bw.Logger.Info("queue manager stopping")
 			return
 		case <-dbSync:
 			bw.SyncWithDB()
-			dbSync = time.After(bw.PollDBTime)
+			dbSync = time.After(bw.DBSyncInterval)
 		default:
 			if e != nil {
 				// None of the workers picked up our job, give them some time
@@ -226,23 +248,29 @@ func (bw *BoltWorker) queueManager() {
 				bw.Logger.Debug("All workers are busy...")
 				continue
 			}
+			bw.qLock.Lock()
 			e = bw.jobQueue.Front()
+			bw.qLock.Unlock()
 			if e != nil {
 				outJob = e.Value.(*boltJob)
-				bw.Logger.Debugf("got job %s from queue", outJob)
-				if !outJob.WorkAT.IsZero() && outJob.WorkAT.Sub(time.Now()) > 0 {
+				if outJob != nil && !outJob.WorkAT.IsZero() && outJob.WorkAT.Sub(time.Now()) > 0 {
+					bw.qLock.Lock()
 					bw.jobQueue.MoveToBack(e)
+					bw.qLock.Unlock()
 					outJob = nil
 					e = nil
 				}
-				if outJobChan != nil {
+				if outJob != nil {
+					bw.Logger.Debugf("got job %s from queue", outJob)
 					outJobChan = bw.getWorkChan
 				} else {
 					outJobChan = emptyChan
 				}
 			} else {
 				outJobChan = emptyChan
-				bw.Logger.Debugf("Job queue is empty... Sleep for IdleSleepTime configured: %s", bw.IdleSleepTime)
+				/*bw.Logger.Debugf("Job queue is empty... Sleep for IdleSleepTime configured: %s",
+				bw.IdleSleepTime)
+				*/
 				time.Sleep(bw.IdleSleepTime)
 			}
 		}
@@ -271,6 +299,7 @@ func (bw *BoltWorker) LoadPendingJobs() {
 // No other concurrent operations with the jobQueue should take place.
 func (bw *BoltWorker) SyncWithDB() error {
 	bw.Logger.Debug("Sync with DB called...")
+	bw.qLock.Lock()
 	jobList, err := bw.DB.GetPendingJobs()
 	if err != nil {
 		err = fmt.Errorf("Error in SyncWithDB, error getting pending jobs from DB: %s", err)
@@ -287,6 +316,7 @@ func (bw *BoltWorker) SyncWithDB() error {
 	for job, v := range bw.jobsInWorkers {
 		jobMap[job] = v
 	}
+	bw.qLock.Unlock()
 
 	for _, job := range jobList {
 		if _, ok := jobMap[job.Name]; ok {
@@ -300,7 +330,9 @@ func (bw *BoltWorker) SyncWithDB() error {
 }
 
 func (bw *BoltWorker) checkAndPushQ(job *boltJob) {
-	var found bool
+	var found, inProcess bool
+	bw.qLock.Lock()
+	defer bw.qLock.Unlock()
 	for e := bw.jobQueue.Front(); e != nil; e = e.Next() {
 		qJob := e.Value.(*boltJob)
 		if qJob.Name == job.Name {
@@ -309,9 +341,29 @@ func (bw *BoltWorker) checkAndPushQ(job *boltJob) {
 			break
 		}
 	}
-	if !found {
+	inProcess, _ = bw.jobsInWorkers[job.Name]
+	if inProcess {
+		bw.Logger.Debugf("checkAndPushQ: job %s is in process", job.Name)
+	}
+	if !found && !inProcess {
 		bw.Logger.Debugf("checkAndPushQ: job %s not in queue, adding it", job.Name)
 		bw.jobQueue.PushBack(job)
+	}
+}
+
+func (bw *BoltWorker) removeFromQ(job *boltJob) {
+	var ele *list.Element
+	bw.qLock.Lock()
+	defer bw.qLock.Unlock()
+	for e := bw.jobQueue.Front(); e != nil; e = e.Next() {
+		qJob := e.Value.(*boltJob)
+		if qJob == job {
+			ele = e
+			break
+		}
+	}
+	if ele != nil {
+		bw.jobQueue.Remove(ele)
 	}
 }
 
@@ -335,7 +387,7 @@ func (bw *BoltWorker) startWork(worker int) {
 				bw.Logger.Debugf("worker %d: nil job received...", worker)
 				continue
 			}
-			bw.Logger.Infof("worker %d: got job %s", worker, job.Name)
+			bw.Logger.Infof("worker %d: got job %s at %v", worker, job, time.Now())
 			// TODO Fix Possible race condition with JobInProcess
 			if job.Status.HasAny(JobPending) && !job.Status.HasAny(JobInProcess) {
 				bw.handlerLock.RLock()
@@ -345,22 +397,24 @@ func (bw *BoltWorker) startWork(worker int) {
 					err := safe.RunE(func() error {
 						job.Status = job.Status | JobInProcess
 						defer job.Status.Remove(JobInProcess)
+						job.Attempt++
 						return handler(job.Args)
 					})
 					if err != nil {
 						if errRetry, ok := err.(RetryJobError); ok {
 							job.Status = job.Status | JobReAttempt
 							bw.Logger.Infof("worker %d: job %s failed temporarily with error %s,"+
-								"attempts: %d, retrying...", worker, job.Name, err, job.Attempt)
+								"attempts: %d, retrying...", worker, job, err, job.Attempt)
 							job.WorkAT = time.Now().Add(errRetry.RetryIN)
-							job.Attempt++
-							if job.Attempt > bw.RetryAttempts {
-								bw.Logger.Infof("worker %d: job %s exceeded max retry attempts (%d of %d), "+
-									"marking the job failed.", worker, job.Name, job.Attempt, bw.RetryAttempts)
-								job.Status = job.Status | JobFailed
+							if job.Attempt >= bw.RetryAttempts {
+								bw.Logger.Infof("worker %d: job %s exceeded max retry attempts "+
+									"(%d of %d), marking the job failed.",
+									worker, job.Name, job.Attempt, bw.RetryAttempts)
+								job.Status = JobFailed
 							}
 						} else {
-							job.Status = job.Status | JobFailed
+							job.Status = JobFailed
+							bw.Logger.Debugf("worker %d: job failed with err: %s", worker, err)
 						}
 					} else {
 						job.Status = JobDone
@@ -369,11 +423,13 @@ func (bw *BoltWorker) startWork(worker int) {
 					job.TimeLastWorkDone = time.Now()
 					bw.updateDBChan <- job
 				} else {
-					bw.Logger.Errorf("worker %d: Handler for %s not found, ignoring job", worker, job.Handler)
+					bw.Logger.Errorf("worker %d: Handler for %s not found, ignoring job",
+						worker, job.Handler)
 					continue
 				}
 			} else {
-				bw.Logger.Debugf("worker %d: Job %s with wrong flag received, ignoring", worker, job)
+				bw.Logger.Debugf("worker %d: Job %s with wrong flag received, ignoring",
+					worker, job)
 			}
 		case <-bw.ctx.Done():
 			bw.cancel()
@@ -393,17 +449,23 @@ func (bw *BoltWorker) perform(job *boltJob) error {
 	}
 	// TODO check for re-attempts
 	go func() {
-		if job.WorkAT.IsZero() || job.WorkAT.Sub(time.Now()) <= 0 {
-			bw.pushWorkChan <- job
-		} else {
-			bw.jobsInWorkers[job.Name] = true
-			select {
-			case <-time.After(time.Until(job.WorkAT)):
+		bw.pushWorkChan <- job
+		/*
+			if job.WorkAT.IsZero() || job.WorkAT.Sub(time.Now()) <= 0 {
 				bw.pushWorkChan <- job
-			case <-bw.ctx.Done():
-				bw.cancel()
+			} else {
+				bw.qLock.Lock()
+				//bw.jobsInWorkers[job.Name] = true
+				bw.qLock.Unlock()
+				select {
+				case <-time.After(time.Until(job.WorkAT)):
+					bw.Logger.Debug("adding job to queue after time...")
+					bw.pushWorkChan <- job
+				case <-bw.ctx.Done():
+					bw.cancel()
+				}
 			}
-		}
+		*/
 	}()
 	return nil
 }
@@ -411,6 +473,8 @@ func (bw *BoltWorker) perform(job *boltJob) error {
 // Stop boltWorker
 func (bw *BoltWorker) Stop() error {
 	bw.Logger.Info("Stopping boltWorker")
+	bw.qStop <- true
+	<-bw.qStop
 	bw.cancel()
 	return nil
 }
@@ -421,6 +485,10 @@ func (bw *BoltWorker) Perform(job worker.Job) error {
 	if bw.isQManagerRunning {
 		bw.updateDBChan <- bJob
 	} else {
+		err := bw.DB.Init()
+		if err != nil {
+			return err
+		}
 		return bw.DB.Update(bJob)
 	}
 	return nil
@@ -434,6 +502,10 @@ func (bw *BoltWorker) PerformIn(job worker.Job, d time.Duration) error {
 	if bw.isQManagerRunning {
 		bw.updateDBChan <- bJob
 	} else {
+		err := bw.DB.Init()
+		if err != nil {
+			return err
+		}
 		return bw.DB.Update(bJob)
 	}
 	return nil
@@ -446,6 +518,10 @@ func (bw *BoltWorker) PerformAt(job worker.Job, t time.Time) error {
 	if bw.isQManagerRunning {
 		bw.updateDBChan <- bJob
 	} else {
+		err := bw.DB.Init()
+		if err != nil {
+			return err
+		}
 		return bw.DB.Update(bJob)
 	}
 	return nil

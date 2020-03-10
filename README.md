@@ -74,7 +74,7 @@ Name of the bucket where jobs which are incomplete will be saved. Default 'pendi
 Name of the bucket where jobs which fail will be saved. Default 'failed'.
 ```
 
-###	**PollDBTime**       ```string```
+###	**DBSyncInterval**       ```string```
 ```
 A time.Duration string used as in interval to sync boltDB to read jobs from the DB. Default '30s'. 
 ```

@@ -19,7 +19,7 @@ type Options struct {
 	CompletedBucket  string
 	PendingBucket    string
 	FailedBucket     string
-	PollDBTime       string
+	DBSyncInterval   string
 	MaxRetryAttempts int
 	IdleSleepTime    string
 	JobNameHandler   JobNameGenerator

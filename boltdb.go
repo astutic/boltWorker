@@ -113,11 +113,17 @@ func (b *boltDB) _moveFromPendingTo(job *boltJob, toBucket []byte) error {
 	}
 	return b.db.Update(func(tx *bolt.Tx) error {
 		pB := tx.Bucket(b.pendingBucket)
+		if pB == nil {
+			return fmt.Errorf("bucket: %s not found", string(b.pendingBucket))
+		}
 		err := pB.Delete([]byte(job.Name))
 		if err != nil {
 			return err
 		}
 		tB := tx.Bucket(toBucket)
+		if tB == nil {
+			return fmt.Errorf("bucket: %s not found", string(toBucket))
+		}
 		err = tB.Put([]byte(job.Name), []byte(job.String()))
 		if err != nil {
 			return err
@@ -137,6 +143,9 @@ func (b *boltDB) _updatePending(job *boltJob) error {
 func (b *boltDB) forEach(bucket []byte, fn func(k, v []byte) error) error {
 	return b.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucket)
-		return b.ForEach(fn)
+		if b != nil {
+			return b.ForEach(fn)
+		}
+		return fmt.Errorf("%s bucket not found", string(bucket))
 	})
 }
