@@ -58,7 +58,7 @@ func TestMain(m *testing.M) {
 
 	logger := logrus.New()
 	logger.Formatter = &logrus.TextFormatter{}
-	logger.Level = logrus.DebugLevel
+	logger.Level = logrus.InfoLevel
 
 	ctx, cancel := context.WithCancel(context.Background())
 	ctx, cancel = context.WithTimeout(ctx, 200*time.Second)
@@ -500,7 +500,7 @@ func TestStopped(t *testing.T) {
 	defer os.Remove(filepath.Join(baseDir, "test_bw2.db"))
 	logger := logrus.New()
 	logger.Formatter = &logrus.TextFormatter{}
-	logger.Level = logrus.DebugLevel
+	logger.Level = logrus.InfoLevel
 
 	var bw2 = NewBoltWorker(Options{
 		FilePath:       filepath.Join(baseDir, "test_bw2.db"),
@@ -641,9 +641,6 @@ func TestStopped(t *testing.T) {
 
 func TestErrors(t *testing.T) {
 	defer os.Remove(filepath.Join(baseDir, "test_bw3.db"))
-	logger := logrus.New()
-	logger.Formatter = &logrus.TextFormatter{}
-	logger.Level = logrus.DebugLevel
 
 	r := require.New(t)
 
