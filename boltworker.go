@@ -73,7 +73,7 @@ func NewBoltWorkerWithContext(ctx context.Context, opts Options) *BoltWorker {
 	ctx, cancel := context.WithCancel(ctx)
 
 	if opts.FilePath == "" {
-		panic(fmt.Errorf("FilePath is required"))
+		panic("FilePath is required")
 	}
 	// Set defaults if not provided in options
 	opts.Name = defaults.String(opts.Name, "buffalo")
@@ -99,16 +99,16 @@ func NewBoltWorkerWithContext(ctx context.Context, opts Options) *BoltWorker {
 	bDB := NewBoltDB(&opts)
 	pollTime, err := time.ParseDuration(opts.DBSyncInterval)
 	if err != nil {
-		panic(err)
+		panic(fmt.Sprintf("error parsing DBSyncInterval: %s", err))
 	}
 	idleTime, err := time.ParseDuration(opts.IdleSleepTime)
 	if err != nil {
-		panic(err)
+		panic(fmt.Sprintf("error parsing IdleSleepTime: %s", err))
 	}
 
 	if pollTime <= idleTime {
-		panic(fmt.Errorf("DBSyncInterval is configured less than IdleSleepTime," +
-			"please have a higher value for DBSyncInterval"))
+		panic("DBSyncInterval is configured less than IdleSleepTime, " +
+			"please have a higher value for DBSyncInterval")
 	}
 
 	return &BoltWorker{
@@ -233,10 +233,6 @@ func (bw *BoltWorker) queueManager() {
 		case <-bw.qStop:
 			bw.Logger.Info("queue manager stopping")
 			bw.qStop <- true
-			return
-		case <-bw.ctx.Done():
-			bw.cancel()
-			bw.Logger.Info("queue manager stopping")
 			return
 		case <-dbSync:
 			bw.SyncWithDB()
@@ -388,7 +384,6 @@ func (bw *BoltWorker) startWork(worker int) {
 				continue
 			}
 			bw.Logger.Infof("worker %d: got job %s at %v", worker, job, time.Now())
-			// TODO Fix Possible race condition with JobInProcess
 			if job.Status.HasAny(JobPending) && !job.Status.HasAny(JobInProcess) {
 				bw.handlerLock.RLock()
 				handler, ok := bw.handlers[job.Handler]
@@ -447,7 +442,6 @@ func (bw *BoltWorker) perform(job *boltJob) error {
 		bw.Logger.Error(err)
 		return err
 	}
-	// TODO check for re-attempts
 	go func() {
 		bw.pushWorkChan <- job
 		/*

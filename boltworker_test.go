@@ -298,15 +298,6 @@ func TestConfig(t *testing.T) {
 		fmt.Println("opening the DB for checking JOB entry", filepath.Join(baseDir, "test_bw1.db"))
 		t.Log("opening the DB for checking entries..")
 
-		/*
-			newDB, _ := os.Create(filepath.Join(baseDir, "test_bw1copy.db"))
-			inDB, _ := os.Open(filepath.Join(baseDir, "test_bw1.db"))
-			io.Copy(newDB, inDB)
-			inDB.Close()
-			newDB.Close()
-
-			db, err := bolt.Open(filepath.Join(baseDir, "test_bw1copy.db"), 0600, &bolt.Options{
-		*/
 		db, err := bolt.Open(filepath.Join(baseDir, "test_bw1.db"), 0600, &bolt.Options{
 			ReadOnly: true,
 		})
@@ -480,7 +471,7 @@ func TestConfig(t *testing.T) {
 	}
 
 	t.Run("testConfiguration", func(t *testing.T) {
-		t.Run("testDBcreation", testDBCreation)
+		t.Run("testDBCreation", testDBCreation)
 		t.Run("testBucketCreation", testBucketCreation)
 		t.Run("testHandleRegistration", testHandleRegistration)
 		t.Run("testJobInDB", testJobInDB)
@@ -646,4 +637,61 @@ func TestStopped(t *testing.T) {
 	})
 
 	bw2.Stop()
+}
+
+func TestErrors(t *testing.T) {
+	defer os.Remove(filepath.Join(baseDir, "test_bw3.db"))
+	logger := logrus.New()
+	logger.Formatter = &logrus.TextFormatter{}
+	logger.Level = logrus.DebugLevel
+
+	r := require.New(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		select {
+		case <-ctx.Done():
+			cancel()
+			log.Fatal(ctx.Err())
+		}
+	}()
+
+	r.PanicsWithValue("FilePath is required", func() {
+		bw = NewBoltWorker(Options{
+			FilePath: "",
+		})
+	})
+	var bw = NewBoltWorker(Options{
+		FilePath: filepath.Join(baseDir, "test_bw3.db"),
+	})
+
+	bw.DB.fileName = ""
+
+	err := bw.Start(ctx)
+
+	r.EqualError(err, "error initializing boltDB: open : no such file or directory")
+
+	r.PanicsWithValue("DBSyncInterval is configured less than IdleSleepTime, "+
+		"please have a higher value for DBSyncInterval", func() {
+		bw = NewBoltWorker(Options{
+			FilePath:       filepath.Join(baseDir, "test_bw3.db"),
+			DBSyncInterval: "1ms",
+			IdleSleepTime:  "10ms",
+		})
+	})
+
+	r.PanicsWithValue("error parsing DBSyncInterval: time: unknown unit jms in duration 1jms", func() {
+		bw = NewBoltWorker(Options{
+			FilePath:       filepath.Join(baseDir, "test_bw3.db"),
+			DBSyncInterval: "1jms",
+			IdleSleepTime:  "10yms",
+		})
+	})
+
+	r.PanicsWithValue("error parsing IdleSleepTime: time: unknown unit yms in duration 10yms", func() {
+		bw = NewBoltWorker(Options{
+			FilePath:      filepath.Join(baseDir, "test_bw3.db"),
+			IdleSleepTime: "10yms",
+		})
+	})
 }
