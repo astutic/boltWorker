@@ -3,7 +3,8 @@
  * BoltWorker - A very simple worker for go buffalo with persistence via boltDB.
  * This code is a modification of SimpleWorker implemented here
  * https://github.com/gobuffalo/buffalo/blob/master/worker/simple.go
- * to support persistence via boltDB.
+ * and supports persistence via boltDB.
+ * Also supports performing tasks via grift tasks of your buffalo app.
  *
  */
 
@@ -444,22 +445,6 @@ func (bw *BoltWorker) perform(job *boltJob) error {
 	}
 	go func() {
 		bw.pushWorkChan <- job
-		/*
-			if job.WorkAT.IsZero() || job.WorkAT.Sub(time.Now()) <= 0 {
-				bw.pushWorkChan <- job
-			} else {
-				bw.qLock.Lock()
-				//bw.jobsInWorkers[job.Name] = true
-				bw.qLock.Unlock()
-				select {
-				case <-time.After(time.Until(job.WorkAT)):
-					bw.Logger.Debug("adding job to queue after time...")
-					bw.pushWorkChan <- job
-				case <-bw.ctx.Done():
-					bw.cancel()
-				}
-			}
-		*/
 	}()
 	return nil
 }
