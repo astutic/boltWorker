@@ -1,5 +1,6 @@
 # boltWorker
-A Simple boltDB based Worker which can be used with gobuffalo's background worker interface
+A Simple boltDB based Worker which can be used with gobuffalo's background worker interface.
+
 Suitable for managing background tasks for single standalone binaries.
 
 Works with grift tasks of your buffalo app
